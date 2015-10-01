@@ -1,0 +1,129 @@
+/* Mensura 2015 - UrOS
+ *  Extensor Rele UrOs 
+ *  
+ *  Programado por Daniel Kock e Luiz Pinage
+ *  
+ *  - Extensor que controla:
+ *      - Rele
+ *        - A - liga rele
+ *        - B - desliga rele
+ *      
+ *  - Comunicação RF24 com central
+ *  
+ *  V2.0 
+ *  6 de Set de 2015
+ */
+
+#include <SPI.h>
+#include "nRF24L01.h"
+#include "RF24.h"
+#include "printf.h"
+
+
+
+#define N_max_estensores 			10
+#define comando_liga_rele 			0x000000B1
+#define comando_desliga_rele 		0x000000B0
+#define comando_liga_lampada		0x000000A1
+#define comando_desliga_lampada 	0x000000A0
+#define comando_tecla_powerON		0x000000C1
+#define comando_tecla_powerOFF		0x000000C0
+#define comando_tecla_volMais		0x000000D1
+#define comando_tecla_volMenos		0x000000D0
+#define comando_tecla_chnMais		0x000000E1
+#define comando_tecla_chnMenos		0x000000E0
+
+#define comando_tecla_edita_powerON			0x000000C3
+#define comando_tecla_edita_powerOFF		0x000000C2
+#define comando_tecla_edita_volMais			0x000000D3
+#define comando_tecla_edita_volMenos		0x000000D2
+#define comando_tecla_edita_chnMais			0x000000E3
+#define comando_tecla_edita_chnMenos		0x000000E2
+
+uint8_t id_central                = 001;
+uint8_t id_extensor_infravermelho = 002;
+uint8_t id_extensor_lampada       = 003;
+uint8_t id_extensor_rele          = 004;
+
+
+RF24 radio(9,10);
+
+int pino_rele = 8;
+int led_vermelho = 7; 
+int led_verde = 6;
+
+const uint64_t canal_escrita= 0xF0F0F0F0D2LL;
+const uint64_t canal_leitura= 0xF0F0F0F0D1LL;
+
+// definicao da mensagem
+typedef struct {
+	uint8_t			origem;
+	uint8_t 		destino;
+	uint8_t 		tipo;
+	uint32_t 		dados;
+	uint8_t			interno;
+} msg_uros;
+
+msg_uros mensagem;
+
+void monta_mensagem(uint32_t dados_mensagen){
+	mensagem.dados=((0x00000000)|dados_mensagen);
+	
+}
+
+void setup(void)
+{
+  Serial.begin(115200);
+  Serial.println("\t\t********** Mensura 2015 *********\n");
+  Serial.println("\t\t*************** UrOS *********\n");
+  Serial.println("\t\t\tReceptor Rele\n");
+  
+  pinMode(pino_rele,OUTPUT);
+  digitalWrite(pino_rele,LOW);
+
+  radio.begin();  
+  printf_begin();
+  radio.setRetries(5,5);
+  radio.setPayloadSize(8);
+  radio.printDetails();
+ // radio.openWritingPipe(canal_escrita);
+  radio.openReadingPipe(1,canal_leitura);
+  radio.startListening();
+  
+  pinMode(led_vermelho,OUTPUT);
+  pinMode(led_verde,OUTPUT);
+}
+
+void loop(void)
+{
+  
+     if ( radio.available() )
+    {
+      
+      bool done ;
+       radio.read( &mensagem, sizeof(msg_uros) );
+        radio.stopListening();
+
+     // printf("Recebeu pacote:");
+     // Serial.println(mensagem.dados,HEX);
+     if(mensagem.destino == id_extensor_rele){
+     	done = true;
+    
+      
+      if(mensagem.dados==comando_liga_rele) {
+        digitalWrite(pino_rele,HIGH);
+        Serial.println("Ligando rele");
+      }		
+      else if(mensagem.dados==comando_desliga_rele)  {
+           Serial.println("Desligando rele");
+           digitalWrite(pino_rele,LOW);
+      }
+     } else {
+     	
+     		Serial.println("Valor recebido nao e para mim");
+     		done = false;
+     }
+        radio.startListening();
+    }    
+    
+  }
