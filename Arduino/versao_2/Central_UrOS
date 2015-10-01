@@ -1,0 +1,368 @@
+/* Mensura 2015 - UrOS
+ *  Central UrOs 
+ *  
+ *  Programado por Daniel Kock e Luiz Pinage
+ *  
+ *  - Comunicacao NRF24L01 com extensores
+ *      - Rele
+ *		- Tomada
+ *		- InfraRed
+ *      
+ *  - Comunicação BlueTooth com App
+ *  
+ *  V2.1 
+ *  22 de Set de 2015
+ */
+
+#include <SPI.h>
+#include "nRF24L01.h"
+#include "RF24.h"
+#include "printf.h"
+#include <SoftwareSerial.h>
+
+
+
+#define N_max_estensores 			10
+#define comando_liga_rele 			0x000000B1
+#define comando_desliga_rele 		0x000000B0
+#define comando_liga_lampada		0x000000A1
+#define comando_desliga_lampada 	0x000000A0
+#define comando_tecla_powerON		0x000000C1
+#define comando_tecla_powerOFF		0x000000C0
+#define comando_tecla_volMais		0x000000D1
+#define comando_tecla_volMenos		0x000000D0
+#define comando_tecla_chnMais		0x000000E1
+#define comando_tecla_chnMenos		0x000000E0
+
+#define comando_tecla_edita_powerON			0x000000C3
+#define comando_tecla_edita_powerOFF		0x000000C2
+#define comando_tecla_edita_volMais			0x000000D3
+#define comando_tecla_edita_volMenos		0x000000D2
+#define comando_tecla_edita_chnMais			0x000000E3
+#define comando_tecla_edita_chnMenos		0x000000E2
+
+
+uint8_t id_central                = 001;
+uint8_t id_extensor_infravermelho = 002;
+uint8_t id_extensor_lampada       = 003;
+uint8_t id_extensor_rele          = 004;
+
+
+
+
+SoftwareSerial BTSerial(6, 7); 
+
+RF24 radio(9,10);
+
+uint8_t enderecoCentral=0x00;
+uint8_t endereco_extensor[N_max_estensores];
+
+
+typedef enum { controle = 1, dado=2 } tipo_mensagem;
+
+
+
+// definicao da mensagem
+typedef struct {
+	uint8_t			origem;
+	uint8_t 		destino;
+	uint8_t 		tipo;
+	uint32_t 		dados;
+	uint8_t			interno;
+} msg_uros;
+
+static msg_uros mensagem;
+
+void monta_mensagem_lampada(uint32_t dados_mensagen){
+	mensagem.dados=((0x00000000)|dados_mensagen);
+	mensagem.destino = id_extensor_lampada;
+}
+
+void monta_mensagem_rele(uint32_t dados_mensagen){
+	mensagem.dados=((0x00000000)|dados_mensagen);
+	mensagem.destino = id_extensor_rele;
+}
+
+void monta_mensagem_IR(uint32_t dados_mensagen){
+	mensagem.dados=((0x00000000)|dados_mensagen);
+		mensagem.destino = id_extensor_infravermelho;
+}
+
+const uint64_t canal_escrita= 0xF0F0F0F0D1LL;
+const uint64_t canal_leitura= 0xF0F0F0F0D2LL;
+
+
+void setup(void)
+{
+
+  Serial.begin(9600);
+  BTSerial.begin(9600);
+  Serial.println("\t\t********** Mensura 2015*********\n");
+  Serial.println("\t\t**************** UrOS *********\n");
+  Serial.println("\t\t\tCentral BT+NRF\n");
+  
+  printf_begin();
+  radio.begin();  
+  radio.setRetries(5,5);
+  radio.setPayloadSize(8);
+  radio.openWritingPipe(canal_escrita);
+  radio.openReadingPipe(1,canal_leitura);
+  radio.printDetails();
+
+
+}
+    
+
+void loop(void)
+{
+    verificaBT();
+
+  }
+  
+void verificaBT(){ 
+
+	if (BTSerial.available()) {
+ 
+    String string_serial="";
+
+	Serial.println("------------");
+    string_serial=BTSerial.readStringUntil('~');
+    Serial.print("Dado recebido do BT:  ");
+    Serial.println(string_serial);
+    executaComandos(string_serial);
+	}
+}
+    
+void serialEvent(){ 
+
+	if (Serial.available()) {
+ 
+    String string_serial="";
+   
+	Serial.println("------------");
+    string_serial=Serial.readStringUntil('~');
+    Serial.print("Dado recebido na porta serial:  ");
+    Serial.println(string_serial);
+    executaComandos(string_serial);
+   	
+}
+}
+
+void executaComandos (String string_serial){	
+    radio.stopListening();
+	bool ok=false;
+	
+	/*************************** liga e desliga rele ***********************/
+    
+    if (string_serial=="B1"){
+    monta_mensagem_rele(comando_liga_rele);
+    printf("enviando dado: ");
+    Serial.println(mensagem.dados,HEX);
+    ok = radio.write( &mensagem, sizeof(msg_uros));
+    bool batata = verificaEnvio();
+    if (ok && batata)
+      printf("OK, Dado Enviado\n");
+    else
+      printf("Falhou envio\n");
+    }
+    
+    else if (string_serial=="B0"){
+    monta_mensagem_rele(comando_desliga_rele);
+    printf("enviando dado: ");
+    Serial.println(mensagem.dados,HEX);
+    ok = radio.write( &mensagem, sizeof(msg_uros));
+    if (ok &&  verificaEnvio())
+      printf("OK, Dado Enviado\n");
+    else
+       printf("Falhou envio\n");
+    }
+    
+    /******************************* liga e desliga lampada **********************/
+    
+    else if (string_serial=="A0"){
+    monta_mensagem_lampada(comando_desliga_lampada);
+    printf("enviando dado: ");
+    Serial.println(mensagem.dados,HEX);
+    ok = radio.write( &mensagem, sizeof(msg_uros));
+    if (ok &&  verificaEnvio())
+      printf("OK, Dado Enviado\n");
+    else
+       printf("Falhou envio\n");
+    }
+    
+    else if (string_serial=="A1"){
+    monta_mensagem_lampada(comando_liga_lampada);
+    printf("enviando dado: ");
+    Serial.println(mensagem.dados,HEX);
+    ok = radio.write( &mensagem, sizeof(msg_uros));
+    if (ok &&  verificaEnvio())
+      printf("OK, Dado Enviado\n");
+    else
+       printf("Falhou envio\n");
+    }
+    
+    /*************** envia comando tecla Power On e Power OFF ************/
+    
+    else if (string_serial=="C1"){
+    monta_mensagem_IR(comando_tecla_powerON);
+    printf("enviando dado: ");
+    Serial.println(mensagem.dados,HEX);
+    ok = radio.write( &mensagem, sizeof(msg_uros));
+    if (ok &&  verificaEnvio())
+     printf("OK, Dado Enviado\n");
+    else
+      printf("Falhou envio\n");
+    }
+    
+    else if (string_serial=="C0"){
+    monta_mensagem_IR(comando_tecla_powerOFF);
+    printf("enviando dado: ");
+    Serial.println(mensagem.dados,HEX);
+    ok = radio.write( &mensagem, sizeof(msg_uros));
+    if (ok &&  verificaEnvio())
+      printf("OK, Dado Enviado\n");
+    else
+      printf("Falhou envio\n");
+    }
+    
+    /*************** envia comando tecla Vol Mais e Vol Menos ************/
+    
+    else if (string_serial=="D1"){
+    monta_mensagem_IR(comando_tecla_volMais);
+    printf("enviando dado: ");
+    Serial.println(mensagem.dados,HEX);
+    ok = radio.write( &mensagem, sizeof(msg_uros));
+    if (ok &&  verificaEnvio())
+      printf("OK, Dado Enviado\n");
+    else
+      printf("Falhou envio\n");
+    }
+    
+    else if (string_serial=="D0"){
+    monta_mensagem_IR(comando_tecla_volMenos);
+    printf("enviando dado: ");
+    Serial.println(mensagem.dados,HEX);
+    ok = radio.write( &mensagem, sizeof(msg_uros));
+    if (ok &&  verificaEnvio())
+      printf("OK, Dado Enviado\n");
+    else
+       printf("Falhou envio\n");
+    }
+    
+    /*************** envia comando tecla Chn Mais e Chn Menos ************/
+    
+    else if (string_serial=="E1"){
+    monta_mensagem_IR(comando_tecla_chnMais);
+    printf("enviando dado: ");
+    Serial.println(mensagem.dados,HEX);
+    ok = radio.write( &mensagem, sizeof(msg_uros));
+    if (ok &&  verificaEnvio())
+     printf("OK, Dado Enviado\n");
+    else
+       printf("Falhou envio\n");
+    }
+    
+    else if (string_serial=="E0"){
+    monta_mensagem_IR(comando_tecla_chnMenos);
+    printf("enviando dado: ");
+    Serial.println(mensagem.dados,HEX);
+    ok = radio.write( &mensagem, sizeof(msg_uros));
+    if (ok &&  verificaEnvio())
+      printf("OK, Dado Enviado\n");
+    else
+       printf("Falhou envio\n");
+    }
+       
+        /*************** envia comando tecla edita Power On e Power OFF ************/
+    
+    else if (string_serial=="C3"){
+    monta_mensagem_IR(comando_tecla_edita_powerON);
+    printf("enviando dado: ");
+    Serial.println(mensagem.dados,HEX);
+    ok = radio.write( &mensagem, sizeof(msg_uros));
+    if (ok &&  verificaEnvio())
+     printf("OK, Dado Enviado\n");
+    else
+      printf("Falhou envio\n");
+    }
+    
+    else if (string_serial=="C2"){
+    monta_mensagem_IR(comando_tecla_edita_powerOFF);
+    printf("enviando dado: ");
+    Serial.println(mensagem.dados,HEX);
+    ok = radio.write( &mensagem, sizeof(msg_uros));
+    if (ok &&  verificaEnvio())
+      printf("OK, Dado Enviado\n");
+    else
+      printf("Falhou envio\n");
+    }
+    
+    /*************** envia comando tecla edita Vol Mais e Vol Menos ************/
+    
+    else if (string_serial=="D3"){
+    monta_mensagem_IR(comando_tecla_edita_volMais);
+    printf("enviando dado: ");
+    Serial.println(mensagem.dados,HEX);
+    ok = radio.write( &mensagem, sizeof(msg_uros));
+    if (ok &&  verificaEnvio())
+      printf("OK, Dado Enviado\n");
+    else
+      printf("Falhou envio\n");
+    }
+    
+    else if (string_serial=="D2"){
+    monta_mensagem_IR(comando_tecla_edita_volMenos);
+    printf("enviando dado: ");
+    Serial.println(mensagem.dados,HEX);
+    ok = radio.write( &mensagem, sizeof(msg_uros));
+    if (ok &&  verificaEnvio())
+      printf("OK, Dado Enviado\n");
+    else
+       printf("Falhou envio\n");
+    }
+    
+    /*************** envia comando tecla edita Chn Mais e Chn Menos ************/
+    
+    else if (string_serial=="E3"){
+    monta_mensagem_IR(comando_tecla_edita_chnMais);
+    printf("enviando dado: ");
+    Serial.println(mensagem.dados,HEX);
+    ok = radio.write( &mensagem, sizeof(msg_uros));
+    if (ok &&  verificaEnvio())
+     printf("OK, Dado Enviado\n");
+    else
+       printf("Falhou envio\n");
+    }
+    
+    else if (string_serial=="E2"){
+    monta_mensagem_IR(comando_tecla_edita_chnMenos);
+    printf("enviando dado: ");
+    Serial.println(mensagem.dados,HEX);
+    ok = radio.write( &mensagem, sizeof(msg_uros));
+    if (ok &&  verificaEnvio())
+      printf("OK, Dado Enviado\n");
+    else
+       printf("Falhou envio\n");
+    }
+
+    radio.startListening();
+ }
+ 
+ 
+ 
+ 
+ bool verificaEnvio(){
+ 	 // bool done;
+ 	 // radio.available();
+     // int recebe_msg;
+     // radio.read(&recebe_msg, sizeof(recebe_msg));
+     // Serial.println(recebe_msg);
+     // radio.stopListening();
+     // if (recebe_msg == 123){ done = true; }
+     // else {                   done = false;}
+     //  radio.startListening();
+     return true;
+ }
+
+
+
