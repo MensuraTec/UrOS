@@ -1,0 +1,294 @@
+/* Mensura 2015 - UrOS
+ *  Extensor Rele UrOs 
+ *  
+ *  Programado por Daniel Kock e Luiz Pinage
+ *  
+ *  - Extensor que controla:
+ *      -IR
+ *      
+ *  - Comunicação RF24 com central
+ *  
+ *  V2.0 
+ *  22 de Set de 2015
+ */
+
+#include <SPI.h>
+#include "nRF24L01.h"
+#include "RF24.h"
+#include "printf.h"
+#include <IRremote.h>
+#include "IRrecv.h"
+
+#include <EEPROM.h>
+
+
+
+
+RF24 radio(9,10);
+
+//variaveis receptor IR
+int RECV_PIN = 6;
+IRrecv irrecv(RECV_PIN);
+
+const uint64_t canal_escrita= 0xF0F0F0F0D2LL;
+const uint64_t canal_leitura= 0xF0F0F0F0D1LL;
+
+int eeAddress =  0;
+
+// variaveis do infravermelho
+decode_results recebe_codigo;
+decode_results codigo_tecla_powerON;
+decode_results codigo_tecla_powerOFF;
+decode_results codigo_tecla_volMais;
+decode_results codigo_tecla_volMenos;
+decode_results codigo_tecla_chnMais;
+decode_results codigo_tecla_chnMenos;
+
+int time_out = 5000;
+int envia_msg = 123;
+
+
+#define comando_liga_rele 			0x000000A1
+#define comando_desliga_rele 		0x000000A0
+#define comando_liga_lampada		0x000000B1
+#define comando_desliga_lampada 	0x000000B0
+#define comando_tecla_powerON		0x000000C1
+#define comando_tecla_powerOFF		0x000000C0
+#define comando_tecla_volMais		0x000000D1
+#define comando_tecla_volMenos		0x000000D0
+#define comando_tecla_chnMais		0x000000E1
+#define comando_tecla_chnMenos		0x000000E0
+
+#define comando_tecla_edita_powerON			0x000000C3
+#define comando_tecla_edita_powerOFF		0x000000C2
+#define comando_tecla_edita_volMais			0x000000D3
+#define comando_tecla_edita_volMenos		0x000000D2
+#define comando_tecla_edita_chnMais			0x000000E3
+#define comando_tecla_edita_chnMenos		0x000000E2
+
+
+uint8_t id_central                = 001;
+uint8_t id_extensor_infravermelho = 002;
+uint8_t id_extensor_rele          = 003;
+
+// definicao da mensagem
+typedef struct {
+	uint8_t			origem;
+	uint8_t 		destino;
+	uint8_t 		tipo;
+	uint32_t 		dados;
+	uint8_t			interno;
+} msg_uros;
+
+msg_uros mensagem;
+
+void monta_mensagem(uint32_t dados_mensagen){
+	mensagem.dados=((0x00000000)|dados_mensagen);
+}
+
+void montaCodigo(uint32_t codigoIr){
+	recebe_codigo.value = codigoIr;
+}
+
+int led = 4;
+
+void piscaLed(){
+	digitalWrite(led, HIGH);
+	delay(50);
+	digitalWrite(led, LOW);
+	delay(50);
+	digitalWrite(led, HIGH);
+	delay(50);
+	digitalWrite(led, LOW);
+}
+
+
+void setup(void)
+{
+  Serial.begin(9600);
+  Serial.println("\t\t********** Mensura 2015 *********\n");
+  Serial.println("\t\t*************** UrOS *********\n");
+  Serial.println("\t\t\tReceptor InfraRed\n");
+  
+  
+EEPROM.get( eeAddress+32*0, codigo_tecla_powerON );
+EEPROM.get( eeAddress+32*1 , codigo_tecla_powerOFF);
+EEPROM.get( eeAddress+32*2 , codigo_tecla_volMais );
+EEPROM.get( eeAddress+32*3 , codigo_tecla_volMenos);
+EEPROM.get( eeAddress+32*4 , codigo_tecla_chnMais );
+EEPROM.get( eeAddress+32*5 , codigo_tecla_chnMenos);
+
+
+  radio.begin();  
+  printf_begin();
+  radio.setRetries(5,5);
+  radio.setPayloadSize(8);
+  radio.printDetails();
+ // radio.openWritingPipe(canal_escrita);
+  radio.openReadingPipe(1,canal_leitura);
+  radio.openWritingPipe(canal_escrita);
+  radio.startListening();
+  
+  pinMode(led,OUTPUT);
+  
+}
+
+void loop(void)
+{
+  
+     if ( radio.available() )
+    {
+      
+      bool done = false;
+      radio.read( &mensagem, sizeof(msg_uros) );
+      Serial.println("--------");
+      
+         radio.stopListening();
+         
+         if (mensagem.destino == id_extensor_infravermelho){
+    			 verificaEntrada(mensagem.dados);
+    			 done = true;
+    			 
+         } else {
+         	Serial.println("Valor recebido nao e para mim");
+         	done = false;
+         	
+         }
+    
+        radio.startListening();
+     
+    }    
+    
+  }
+  
+  void verificaEntrada(int entrada){
+  	
+  	if (entrada==comando_tecla_powerON){
+      	Serial.println("Codigo tecla Power On enviado. ");
+      	Serial.println(codigo_tecla_powerON.value,HEX);
+   		sendCode(&codigo_tecla_powerON); 
+   		piscaLed();
+   		//	radio.write( &envia_msg, sizeof(envia_msg));
+      }
+      else if (entrada==comando_tecla_powerOFF){
+      	Serial.println("Codigo tecla Power Off enviado. ");
+      	Serial.println(codigo_tecla_powerOFF.value,HEX);
+   		sendCode(&codigo_tecla_powerOFF);
+   		piscaLed();
+   	//		radio.write( &envia_msg, sizeof(envia_msg));
+      }
+       else if (entrada==comando_tecla_volMais){
+      	Serial.println("Codigo tecla Volume Mais enviado. ");
+      	Serial.println(codigo_tecla_volMais.value,HEX);
+   		sendCode(&codigo_tecla_volMais);
+   		piscaLed();
+   		//	radio.write( &envia_msg, sizeof(envia_msg));
+      }
+       else if (entrada==comando_tecla_volMenos){
+      	Serial.println("Codigo tecla Volume Menos enviado. ");
+      	Serial.println(codigo_tecla_volMenos.value,HEX);
+   		sendCode(&codigo_tecla_volMenos);
+   		piscaLed();
+   	//		radio.write( &envia_msg, sizeof(envia_msg));
+      }
+       else if (entrada==comando_tecla_chnMais){
+      	Serial.println("Codigo tecla Canal Mais enviado. ");
+      	Serial.println(codigo_tecla_chnMais.value,HEX);
+   		sendCode(&codigo_tecla_chnMais);
+   		piscaLed();
+   	//		radio.write( &envia_msg, sizeof(envia_msg));
+      }
+       else if (entrada==comando_tecla_chnMenos){
+      	Serial.println("Codigo tecla Canal Menos enviado. ");
+      	Serial.println(codigo_tecla_chnMenos.value,HEX);
+   		sendCode(&codigo_tecla_chnMenos);
+   		piscaLed();
+   	//		radio.write( &envia_msg, sizeof(envia_msg));
+      }
+    
+      /******** edita valor teclas ***********/
+      
+       if (entrada==comando_tecla_edita_powerON){
+      	Serial.print("Envie o codigo IR:  ");
+      //		radio.write( &envia_msg, sizeof(envia_msg));
+      	if(recebeIr().value != 0x0){
+   		codigo_tecla_powerON = recebeIr();
+   		EEPROM.put(eeAddress+32*0, codigo_tecla_powerON);
+      	} else{Serial.println(" Codigo nao atualizado");}
+      }
+      else if (entrada==comando_tecla_edita_powerOFF){
+      	Serial.print("Envie o codigo IR:  ");
+      //		radio.write( &envia_msg, sizeof(envia_msg));
+      	if(recebeIr().value != 0x0){
+   		codigo_tecla_powerOFF = recebeIr();
+   		EEPROM.put(eeAddress+32*1, codigo_tecla_powerOFF);
+      	}else{Serial.println(" Codigo nao atualizado");}
+      }
+       else if (entrada==comando_tecla_edita_volMais){
+      	Serial.print("Envie o codigo IR:  ");
+      	//	radio.write( &envia_msg, sizeof(envia_msg));
+      	if(recebeIr().value != 0x0){
+   		codigo_tecla_volMais = recebeIr();
+   		EEPROM.put(eeAddress+32*2, codigo_tecla_volMais);
+      	}else{Serial.println(" Codigo nao atualizado");}
+      }
+       else if (entrada==comando_tecla_edita_volMenos){
+      	Serial.print("Envie o codigo IR:  ");
+      	//	radio.write( &envia_msg, sizeof(envia_msg));
+      	if(recebeIr().value != 0x0){
+   		codigo_tecla_volMenos = recebeIr();
+   		EEPROM.put(eeAddress+32*3, codigo_tecla_volMenos);
+      	}else{Serial.println(" Codigo nao atualizado");}
+      }
+       else if (entrada==comando_tecla_edita_chnMais){
+      	Serial.print("Envie o codigo IR:  ");
+      	//	radio.write( &envia_msg, sizeof(envia_msg));
+      	if(recebeIr().value != 0x0){
+   		codigo_tecla_chnMais = recebeIr();
+   		EEPROM.put(eeAddress+32*4, codigo_tecla_chnMais);
+      	}else{Serial.println(" Codigo nao atualizado");}
+      }
+       else if (entrada==comando_tecla_edita_chnMenos){
+      	Serial.print("Envie o codigo IR:  ");
+      	//	radio.write( &envia_msg, sizeof(envia_msg));
+      	if(recebeIr().value != 0x0){
+   		codigo_tecla_chnMenos = recebeIr();
+   		EEPROM.put(eeAddress+32*5, codigo_tecla_chnMenos);
+      	}else{Serial.println(" Codigo nao atualizado");}
+      }
+  }
+     
+  
+  decode_results recebeIr(){
+	
+	decode_results codigoIr;
+	    irrecv.enableIRIn();
+		long now = millis();
+	    radio.startListening();
+
+	while (!irrecv.decode(&codigoIr) )
+	{
+		digitalWrite(led,HIGH);
+		if ( radio.available() || (millis() - now > time_out)) {
+		codigoIr.value = 0x0;
+		radio.stopListening();
+		digitalWrite(led,LOW);
+		return codigoIr;
+		}
+   	}
+   	digitalWrite(led,LOW);
+   	irrecv.resume(); // resume receiver
+   
+   	decifraCodigo(&codigoIr);
+    return codigoIr;
+}
+
+  
+  
+  
+  
+  
+  
+  
+  
+  
